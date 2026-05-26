@@ -3,7 +3,7 @@ from pathlib import Path
 from loguru import logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_PROJECT_ROOT = Path(__file__).parents[4]
+_PROJECT_ROOT = Path(__file__).parents[3]
 _DEFAULT_DB = str(_PROJECT_ROOT / "realestate" / "data" / "processed" / "realestate.db")
 _DEFAULT_MODEL = str(_PROJECT_ROOT / "realestate" / "data" / "models" / "price_model_trade_lgbm_complex.pkl")
 

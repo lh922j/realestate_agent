@@ -1,0 +1,98 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+from langchain_core.tools import tool
+from loguru import logger
+
+from ..config import settings
+
+_MODEL_PATH = settings.model_path
+_WORKER = str(Path(__file__).parent / "_predict_subprocess.py")
+
+
+def _predict(row: dict) -> float:
+    env = os.environ.copy()
+    env.update({"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"})
+
+    result = subprocess.run(
+        [sys.executable, _WORKER, _MODEL_PATH],
+        input=json.dumps(row),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"exit code {result.returncode}")
+    return float(result.stdout.strip())
+
+
+def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    dlat = np.radians(lat2 - lat1)
+    dlon = np.radians(lon2 - lon1)
+    a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon / 2) ** 2
+    return 6371.0 * 2 * np.arcsin(np.sqrt(a))
+
+
+@tool
+def predict_price(
+    area_exclusive: float,
+    floor: int,
+    build_year: int,
+    district_code: str,
+    latitude: float,
+    longitude: float,
+    deal_year: int = 2025,
+    deal_month: int = 1,
+    dealing_type: str = "중개거래",
+) -> str:
+    """
+    학습된 LightGBM 모델로 아파트 매매 예상 가격을 예측합니다.
+
+    Args:
+        area_exclusive: 전용면적 (㎡), 예: 84.0
+        floor: 층수, 예: 10
+        build_year: 건축연도, 예: 2010
+        district_code: 시군구 코드 5자리, 예: '11680' (강남구)
+        latitude: 위도, 예: 37.5172
+        longitude: 경도, 예: 127.0473
+        deal_year: 거래 연도 (기본 2025)
+        deal_month: 거래 월 (기본 1)
+        dealing_type: 거래유형 ('중개거래' 또는 '직거래')
+    """
+    gangnam_lat, gangnam_lon = 37.4979, 127.0276
+    dist_gangnam = _haversine(latitude, longitude, gangnam_lat, gangnam_lon)
+    season_map = {12: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 2, 7: 2, 8: 2, 9: 3, 10: 3, 11: 3}
+
+    row = {
+        "area_exclusive": area_exclusive,
+        "floor": floor,
+        "building_age": 2025 - build_year,
+        "deal_year": deal_year,
+        "deal_month": deal_month,
+        "deal_season": season_map[deal_month],
+        "latitude": latitude,
+        "longitude": longitude,
+        "dist_to_gangnam_km": dist_gangnam,
+        "dist_to_subway_km": 0.5,
+        "dist_to_cityhall_km": 2.0,
+        "dealing_type": dealing_type,
+        "sgg_code": district_code,
+    }
+
+    logger.info(f"[predict] area={area_exclusive}㎡ floor={floor} build_year={build_year} sgg={district_code}")
+    try:
+        log_pred = _predict(row)
+        predicted = int(np.expm1(log_pred))
+        logger.info(f"[predict] 결과: {predicted:,}만원")
+        return (
+            f"예측 매매가: {predicted:,}만원 ({predicted / 10000:.2f}억원)\n"
+            f"입력 조건: {area_exclusive}㎡ / {floor}층 / {2025 - build_year}년차 / {district_code}"
+        )
+    except Exception as e:
+        logger.error(f"[predict] 오류: {e}")
+        return f"예측 오류: {e}"

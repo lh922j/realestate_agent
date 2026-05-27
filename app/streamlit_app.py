@@ -259,11 +259,28 @@ with st.sidebar:
 - **전세/월세** 조회: "역삼동 59㎡ 전세 알려줘"
 - 매매·전세·월세 조회 시 **오른쪽 지도** 자동 표시
 """)
-    if st.button("🗑️ 대화 초기화"):
+    if st.button("🗑️ 대화 초기화", use_container_width=True):
         st.session_state.messages = []
         st.session_state.map_entries = []
         st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
+    st.divider()
+
+    # ── 질문 기록 ───────────────────────────────────────────────
+    st.subheader("📝 질문 기록")
+    past_questions = [
+        msg.content
+        for msg in st.session_state.messages
+        if isinstance(msg, HumanMessage)
+    ]
+    if past_questions:
+        for i, q in enumerate(reversed(past_questions)):
+            label = q[:22] + "…" if len(q) > 22 else q
+            if st.button(label, key=f"hist_{i}", use_container_width=True):
+                st.session_state.pending_input = q
+    else:
+        st.caption("아직 질문 기록이 없습니다")
+
     st.divider()
     st.caption("Powered by LangGraph + GPT-4o-mini")
 

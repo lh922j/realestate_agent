@@ -9,8 +9,13 @@
 
 ## 스크린샷
 
-<!-- 스크린샷 추가 예정 -->
-<!-- ![메인 화면](assets/screenshot_main.png) -->
+| 전세 시세 조회 + 지도 | 근처 아파트 조회 |
+|---|---|
+| ![전세 시세 조회](assets/screenshot_jeonse.png) | ![근처 아파트 조회](assets/screenshot_nearby.png) |
+
+| 가격 예측 | 이상거래 탐지 |
+|---|---|
+| ![가격 예측](assets/screenshot_predict.png) | ![이상거래 탐지](assets/screenshot_anomaly.png) |
 
 ---
 

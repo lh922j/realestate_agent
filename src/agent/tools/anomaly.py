@@ -3,6 +3,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from ..db.database import get_engine
+from ._district import district_sql_filter
 
 
 @tool
@@ -32,7 +33,8 @@ def detect_anomaly(
 
     logger.info(f"[anomaly] district={district} area={area_min}~{area_max}㎡ year={year_from}~{year_to} contamination={contamination}")
 
-    sql = text("""
+    district_filter, district_params = district_sql_filter(district, dong_col="t.dong_name", sgg_col="t.sgg_code")
+    sql = text(f"""
         SELECT t.apt_name, t.dong_name, t.area_exclusive, t.floor,
                t.deal_amount, t.price_per_sqm, t.building_age,
                t.deal_year, t.deal_month, t.sgg_code, t.deal_date,
@@ -40,7 +42,7 @@ def detect_anomaly(
         FROM apt_trade t
         LEFT JOIN apt_geocode g
                ON t.apt_name = g.apt_name AND t.dong_name = g.dong_name
-        WHERE t.dong_name LIKE :district
+        WHERE {district_filter}
           AND t.area_exclusive BETWEEN :area_min AND :area_max
           AND t.deal_year BETWEEN :year_from AND :year_to
           AND (t.cancel_type IS NULL OR t.cancel_type = '')
@@ -50,7 +52,7 @@ def detect_anomaly(
         engine = get_engine()
         with engine.connect() as conn:
             rows = conn.execute(sql, {
-                "district": f"%{district}%",
+                **district_params,
                 "area_min": area_min,
                 "area_max": area_max,
                 "year_from": year_from,

@@ -3,6 +3,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from ..db.database import get_engine
+from ._district import district_sql_filter
 
 
 @tool
@@ -40,11 +41,12 @@ def query_rent_data(
     elif rent_type == "월세":
         type_filter = "AND is_jeonse = 0"
 
+    district_filter, district_params = district_sql_filter(district)
     sql = text(f"""
         SELECT apt_name, dong_name, area_exclusive, floor,
                deposit, monthly_rent, is_jeonse, deal_date
         FROM apt_rent
-        WHERE dong_name LIKE :district
+        WHERE {district_filter}
           AND area_exclusive BETWEEN :area_min AND :area_max
           AND deal_year BETWEEN :year_from AND :year_to
           {type_filter}
@@ -56,7 +58,7 @@ def query_rent_data(
         engine = get_engine()
         with engine.connect() as conn:
             rows = conn.execute(sql, {
-                "district": f"%{district}%",
+                **district_params,
                 "area_min": area_min,
                 "area_max": area_max,
                 "year_from": year_from,
@@ -101,13 +103,14 @@ def fetch_map_points_rent(
     elif rent_type == "월세":
         type_filter = "AND r.is_jeonse = 0"
 
+    district_filter, district_params = district_sql_filter(district, dong_col="r.dong_name", sgg_col="r.sgg_code")
     sql = text(f"""
         SELECT r.apt_name, r.dong_name, r.area_exclusive,
                r.deposit, r.monthly_rent, r.is_jeonse,
                g.latitude, g.longitude
         FROM apt_rent r
         JOIN apt_geocode g ON r.apt_name = g.apt_name AND r.dong_name = g.dong_name
-        WHERE r.dong_name LIKE :district
+        WHERE {district_filter}
           AND r.area_exclusive BETWEEN :area_min AND :area_max
           AND r.deal_year BETWEEN :year_from AND :year_to
           AND g.latitude IS NOT NULL
@@ -119,7 +122,7 @@ def fetch_map_points_rent(
         engine = get_engine()
         with engine.connect() as conn:
             rows = conn.execute(sql, {
-                "district": f"%{district}%",
+                **district_params,
                 "area_min": area_min, "area_max": area_max,
                 "year_from": year_from, "year_to": year_to,
                 "limit": limit,

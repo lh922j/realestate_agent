@@ -3,6 +3,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from ..db.database import get_engine
+from ._district import district_sql_filter
 
 
 @tool
@@ -31,10 +32,11 @@ def query_trade_data(
     limit = min(limit, 50)
     logger.info(f"[query] district={district} area={area_min}~{area_max}㎡ year={year_from}~{year_to} limit={limit}")
 
-    sql = text("""
+    district_filter, district_params = district_sql_filter(district)
+    sql = text(f"""
         SELECT apt_name, dong_name, area_exclusive, floor, deal_amount, deal_date
         FROM apt_trade
-        WHERE dong_name LIKE :district
+        WHERE {district_filter}
           AND area_exclusive BETWEEN :area_min AND :area_max
           AND deal_year BETWEEN :year_from AND :year_to
         ORDER BY deal_date DESC
@@ -45,7 +47,7 @@ def query_trade_data(
         engine = get_engine()
         with engine.connect() as conn:
             rows = conn.execute(sql, {
-                "district": f"%{district}%",
+                **district_params,
                 "area_min": area_min,
                 "area_max": area_max,
                 "year_from": year_from,
@@ -81,12 +83,13 @@ def fetch_map_points(
     limit: int = 50,
 ) -> list[dict]:
     """Streamlit에서 직접 호출하는 좌표 조회 함수. @tool 밖에 있어서 config 의존 없음."""
-    sql = text("""
+    district_filter, district_params = district_sql_filter(district)
+    sql = text(f"""
         SELECT t.apt_name, t.dong_name, t.area_exclusive, t.deal_amount,
                g.latitude, g.longitude
         FROM apt_trade t
         LEFT JOIN apt_geocode g ON t.apt_name = g.apt_name AND t.dong_name = g.dong_name
-        WHERE t.dong_name LIKE :district
+        WHERE {district_filter}
           AND t.area_exclusive BETWEEN :area_min AND :area_max
           AND t.deal_year BETWEEN :year_from AND :year_to
           AND g.latitude IS NOT NULL
@@ -97,7 +100,7 @@ def fetch_map_points(
         engine = get_engine()
         with engine.connect() as conn:
             rows = conn.execute(sql, {
-                "district": f"%{district}%",
+                **district_params,
                 "area_min": area_min,
                 "area_max": area_max,
                 "year_from": year_from,

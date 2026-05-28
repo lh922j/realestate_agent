@@ -217,10 +217,10 @@ def query_rent_nearby(
         for r in rows:
             dist = _haversine_km(latitude, longitude, r.latitude, r.longitude)
             kind = "전세" if r.is_jeonse else "월세"
-            monthly = f"{int(r.monthly_rent):,}만" if not r.is_jeonse else "-"
+            monthly = f"{int(r.monthly_rent):,}만원" if not r.is_jeonse else "-"
             lines.append(
                 f"{r.apt_name:<20} {r.dong_name:<10} {r.area_exclusive:>5.1f}㎡ "
-                f"{kind:>4} {int(r.deposit):>8,}만 {monthly:>8} {str(r.deal_date):>12} ({dist:.2f}km)"
+                f"{kind:>4} {int(r.deposit):>8,}만원 {monthly:>8} {str(r.deal_date):>12} ({dist:.2f}km)"
             )
         return "\n".join(lines)
 

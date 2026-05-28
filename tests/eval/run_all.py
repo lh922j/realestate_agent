@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[3]))
 
 
 def main():
-    from tests.eval import predict_accuracy, latency
+    from tests.eval import predict_accuracy, latency, task_completion
 
     print("\n" + "=" * 60)
     print("  부동산 Agentic AI — 전체 평가")
@@ -20,7 +20,10 @@ def main():
     # 1. 가격 예측 정확도
     pred = predict_accuracy.run()
 
-    # 2. 레이턴시 (tool_selection은 LLM 호출 비용이 발생하므로 선택적 실행)
+    # 2. 태스크 완료율 (end-to-end extrinsic)
+    tc = task_completion.run()
+
+    # 3. 레이턴시 (tool_selection은 LLM 호출 비용이 발생하므로 선택적 실행)
     lat = latency.run()
 
     # ── 요약 ─────────────────────────────────────────────────────────
@@ -30,6 +33,9 @@ def main():
 
     if pred:
         print(f"  [가격 예측]  MAE {pred['mae']:,.0f}만원 | R² {pred['r2']:.4f} | MAPE {pred['mape']:.1f}%")
+
+    if tc:
+        print(f"  [태스크 완료율]  {tc['correct']}/{tc['total']} = {tc['accuracy']:.1f}%")
 
     if lat:
         slowest = max(lat, key=lambda k: lat[k]["avg"])

@@ -13,6 +13,16 @@ from ..config import settings
 _MODEL_PATH = settings.model_path
 _WORKER = str(Path(__file__).parent / "_predict_subprocess.py")
 
+_RAG_DIR = Path(__file__).parents[1] / "rag"
+
+with open(_RAG_DIR / "spatial_coords.json", encoding="utf-8") as _f:
+    _spatial = json.load(_f)
+_SUBWAY_COORDS = np.array(list(_spatial["subway_stations"].values()))    # (N, 2) lat/lon
+_OFFICE_COORDS = np.array(list(_spatial["office_locations"].values()))   # (M, 2) lat/lon
+
+with open(_RAG_DIR / "lawd_cd_to_sgg_code.json", encoding="utf-8") as _f:
+    _LAWD_TO_GEO = json.load(_f)
+
 
 def _predict(row: dict) -> float:
     env = os.environ.copy()
@@ -36,6 +46,16 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlon = np.radians(lon2 - lon1)
     a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon / 2) ** 2
     return 6371.0 * 2 * np.arcsin(np.sqrt(a))
+
+
+def _min_dist_km(lat: float, lon: float, ref_coords: np.ndarray) -> float:
+    """위경도(lat, lon)에서 ref_coords 중 가장 가까운 점까지 Haversine 거리(km)"""
+    lats = np.radians(ref_coords[:, 0])
+    lons = np.radians(ref_coords[:, 1])
+    dlat = lats - np.radians(lat)
+    dlon = lons - np.radians(lon)
+    a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat)) * np.cos(lats) * np.sin(dlon / 2) ** 2
+    return float(6371.0 * 2 * np.arcsin(np.sqrt(np.clip(a, 0, 1))).min())
 
 
 @tool
@@ -65,7 +85,11 @@ def predict_price(
         dealing_type: 거래유형 ('중개거래' 또는 '직거래')
     """
     gangnam_lat, gangnam_lon = 37.4979, 127.0276
-    dist_gangnam = _haversine(latitude, longitude, gangnam_lat, gangnam_lon)
+    dist_gangnam   = _haversine(latitude, longitude, gangnam_lat, gangnam_lon)
+    dist_subway    = _min_dist_km(latitude, longitude, _SUBWAY_COORDS)
+    dist_cityhall  = _min_dist_km(latitude, longitude, _OFFICE_COORDS)
+    # district_code는 API lawd_cd 형식 → 학습 시 GeoJSON 코드 형식으로 변환
+    geo_sgg_code   = _LAWD_TO_GEO.get(str(district_code), "unknown")
     season_map = {12: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 2, 7: 2, 8: 2, 9: 3, 10: 3, 11: 3}
 
     row = {
@@ -78,10 +102,10 @@ def predict_price(
         "latitude": latitude,
         "longitude": longitude,
         "dist_to_gangnam_km": dist_gangnam,
-        "dist_to_subway_km": 0.5,
-        "dist_to_cityhall_km": 2.0,
+        "dist_to_subway_km": round(dist_subway, 3),
+        "dist_to_cityhall_km": round(dist_cityhall, 3),
         "dealing_type": dealing_type,
-        "sgg_code": district_code,
+        "sgg_code": geo_sgg_code,
     }
 
     logger.info(f"[predict] area={area_exclusive}㎡ floor={floor} build_year={build_year} sgg={district_code}")

@@ -265,6 +265,7 @@ with st.sidebar:
         st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
     st.divider()
+    debug_mode = st.toggle("🐛 디버그 모드", value=False)
 
     # ── 질문 기록 ───────────────────────────────────────────────
     st.subheader("📝 질문 기록")
@@ -306,77 +307,98 @@ user_input = st.chat_input("질문을 입력하세요...") or pending
 chat_col, map_col = st.columns([3, 2])
 
 with chat_col:
-    for msg in st.session_state.messages:
-        if isinstance(msg, HumanMessage):
+    chat_container = st.container(height=650, border=False)
+
+    with chat_container:
+        for msg in st.session_state.messages:
+            if isinstance(msg, HumanMessage):
+                with st.chat_message("user"):
+                    st.markdown(msg.content)
+            elif isinstance(msg, AIMessage) and msg.content:
+                with st.chat_message("assistant"):
+                    st.markdown(msg.content)
+
+        if user_input:
+            st.session_state.messages.append(HumanMessage(content=user_input))
+            input_len = len(st.session_state.messages)
+            config = {"configurable": {"thread_id": st.session_state.thread_id}}
+
             with st.chat_message("user"):
-                st.markdown(msg.content)
-        elif isinstance(msg, AIMessage) and msg.content:
+                st.markdown(user_input)
+
             with st.chat_message("assistant"):
-                st.markdown(msg.content)
+                status_slot = st.empty()
+                status_slot.info("🔍 분석 중...")
+                text_slot   = st.empty()
+                full_text   = ""
+                debug_steps = []
 
-    if user_input:
-        st.session_state.messages.append(HumanMessage(content=user_input))
-        input_len = len(st.session_state.messages)
-        config = {"configurable": {"thread_id": st.session_state.thread_id}}
+                _stream_modes = ["messages", "values", "updates"] if debug_mode else ["messages", "values"]
 
-        with st.chat_message("user"):
-            st.markdown(user_input)
+                try:
+                    for event in graph.stream(
+                        {"messages": [HumanMessage(content=user_input)]},
+                        stream_mode=_stream_modes,
+                        config=config,
+                    ):
+                        mode, data = event
 
-        with st.chat_message("assistant"):
-            status_slot = st.empty()
-            status_slot.info("🔍 분석 중...")
-            text_slot   = st.empty()
-            full_text   = ""
-            final_state = None
+                        if mode == "values":
+                            final_state = data
 
-            try:
-                for event in graph.stream(
-                    {"messages": [HumanMessage(content=user_input)]},
-                    stream_mode=["messages", "values"],
-                    config=config,
-                ):
-                    mode, data = event
+                        elif mode == "updates" and debug_mode:
+                            debug_steps.append(data)
 
-                    if mode == "values":
-                        final_state = data
+                        elif mode == "messages":
+                            chunk, meta = data
+                            node = meta.get("langgraph_node", "")
 
-                    elif mode == "messages":
-                        chunk, meta = data
-                        node = meta.get("langgraph_node", "")
+                            if node == "agent" and isinstance(chunk, AIMessageChunk):
+                                valid_tools = [
+                                    tc["name"] for tc in getattr(chunk, "tool_calls", [])
+                                    if tc.get("name")
+                                ]
+                                if valid_tools:
+                                    labels = [TOOL_LABELS.get(n, f"🔄 {n}") for n in valid_tools]
+                                    status_slot.info(" · ".join(labels))
+                                elif chunk.content:
+                                    status_slot.empty()
+                                    full_text += chunk.content
+                                    text_slot.markdown(full_text + "▌")
 
-                        if node == "agent" and isinstance(chunk, AIMessageChunk):
-                            valid_tools = [
-                                tc["name"] for tc in getattr(chunk, "tool_calls", [])
-                                if tc.get("name")
-                            ]
-                            if valid_tools:
-                                labels = [TOOL_LABELS.get(n, f"🔄 {n}") for n in valid_tools]
-                                status_slot.info(" · ".join(labels))
-                            elif chunk.content:
-                                status_slot.empty()
-                                full_text += chunk.content
-                                text_slot.markdown(full_text + "▌")
+                except Exception as e:
+                    status_slot.empty()
+                    text_slot.error(f"오류가 발생했습니다: {e}")
+                    st.stop()
 
-            except Exception as e:
                 status_slot.empty()
-                text_slot.error(f"오류가 발생했습니다: {e}")
-                st.stop()
+                text_slot.markdown(full_text)
 
-            status_slot.empty()
-            text_slot.markdown(full_text)
+                if debug_mode and debug_steps:
+                    with st.expander("🐛 실행 추적", expanded=True):
+                        for step in debug_steps:
+                            for node, changes in step.items():
+                                st.markdown(f"**`[{node}]`**")
+                                for m in changes.get("messages", []):
+                                    if hasattr(m, "tool_calls") and m.tool_calls:
+                                        for tc in m.tool_calls:
+                                            st.code(f"→ {tc['name']}\n{tc['args']}", language="python")
+                                    elif hasattr(m, "content") and m.content:
+                                        preview = str(m.content)
+                                        st.code(preview[:400] + ("..." if len(preview) > 400 else ""))
 
-        if final_state:
-            all_msgs = final_state["messages"]
-            new_msgs = all_msgs[input_len:]  # 현재 턴에서 새로 생긴 메시지만
-            st.session_state.messages.extend(new_msgs)
+            if final_state:
+                all_msgs = final_state["messages"]
+                new_msgs = all_msgs[input_len:]  # 현재 턴에서 새로 생긴 메시지만
+                st.session_state.messages.extend(new_msgs)
 
-            # 현재 턴 메시지만 전달 — 이전 턴 역삼동 등 다른 지역 tool call 재사용 방지
-            pts = _extract_map_points(new_msgs)
-            if pts:
-                st.session_state.map_entries.append({
-                    "question": user_input,
-                    "points":   pts,
-                })
+                # 현재 턴 메시지만 전달 — 이전 턴 역삼동 등 다른 지역 tool call 재사용 방지
+                pts = _extract_map_points(new_msgs)
+                if pts:
+                    st.session_state.map_entries.append({
+                        "question": user_input,
+                        "points":   pts,
+                    })
 
 with map_col:
     if not st.session_state.map_entries:
